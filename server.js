@@ -2,12 +2,12 @@
  * server.js
  *
  * A production-ready API that:
- *   - Takes a "query" from the request body (but it's optional now)
+ *   - Takes a "query" from the request body (optional)
  *   - If query is present:
  *       - Generates an OpenAI embedding
- *       - Retrieves top matches from Supabase (using match_documents RPC)
+ *       - Retrieves top matches from Supabase
  *       - Reranks those matches with Cohere
- *       - Returns the top 3 results (title + content) from the reranker
+ *       - Returns the top 3 results (title + content)
  *     Otherwise:
  *       - Returns all documents
  */
@@ -17,9 +17,7 @@ import { config } from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
 import { CohereClient } from "cohere-ai";
-import cors from 'cors';
-
-app.use(cors());
+import cors from "cors";         // <-- IMPORT CORS
 
 // 1. Load environment variables
 config(); // loads .env
@@ -45,14 +43,14 @@ const cohere = new CohereClient({ apiKey: CO_API_KEY });
 
 // 5. Initialize Express
 const app = express();
+
+// 6. Enable CORS
+app.use(cors());                // <-- ALLOW CROSS-ORIGIN REQUESTS
 app.use(express.json());
 
 /**
  * POST /search
  * Body: { "query"?: "some search term" }
- *
- * If query is provided, returns top 3 documents after reranking with Cohere.
- * If query is not provided, returns all documents.
  */
 app.post("/search", async (req, res) => {
   try {
@@ -75,10 +73,7 @@ app.post("/search", async (req, res) => {
       });
     }
 
-    //
     // If query is provided, do the usual process:
-    //
-
     // 1. Generate embedding for the user's query with OpenAI
     const embeddingResponse = await openai.embeddings.create({
       input: query,
@@ -136,7 +131,7 @@ app.post("/search", async (req, res) => {
   }
 });
 
-// 6. Start the server
+// 7. Start the server
 const port = PORT || 3000;
 app.listen(port, () => {
   console.log(`Server listening on port ${port}...`);
