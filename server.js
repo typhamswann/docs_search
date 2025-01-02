@@ -17,9 +17,9 @@ import { config } from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
 import { CohereClient } from "cohere-ai";
-const cors = require('cors');
+import cors from 'cors';
 
-app.use(cors()); // <= This sets "Access-Control-Allow-Origin: *" by default
+app.use(cors());
 
 // 1. Load environment variables
 config(); // loads .env
