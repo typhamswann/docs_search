@@ -2,11 +2,14 @@
  * server.js
  *
  * A production-ready API that:
- *   - Takes a "query" from the request body
- *   - Generates an OpenAI embedding
- *   - Retrieves top matches from Supabase (using match_documents RPC)
- *   - Reranks those matches with Cohere
- *   - Returns the top 3 results (title + content) from the reranker
+ *   - Takes a "query" from the request body (but it's optional now)
+ *   - If query is present:
+ *       - Generates an OpenAI embedding
+ *       - Retrieves top matches from Supabase (using match_documents RPC)
+ *       - Reranks those matches with Cohere
+ *       - Returns the top 3 results (title + content) from the reranker
+ *     Otherwise:
+ *       - Returns all documents
  */
 
 import express from "express";
@@ -43,33 +46,44 @@ app.use(express.json());
 
 /**
  * POST /search
- * Body: { "query": "some search term" }
+ * Body: { "query"?: "some search term" }
  *
- * Returns top 3 documents after reranking with Cohere.
+ * If query is provided, returns top 3 documents after reranking with Cohere.
+ * If query is not provided, returns all documents.
  */
 app.post("/search", async (req, res) => {
   try {
     const { query } = req.body;
 
+    // If no query is provided, just return all documents
     if (!query) {
-      return res
-        .status(400)
-        .json({ error: "Please provide a 'query' field in the request body." });
+      const { data: allDocs, error: allDocsError } = await supabase
+        .from("documents") // change to your actual table name
+        .select("id, title, content");
+
+      if (allDocsError) {
+        console.error("Error retrieving all documents:", allDocsError.message);
+        return res.status(500).json({ error: "Error retrieving all documents." });
+      }
+
+      // Return full JSON (all documents)
+      return res.status(200).json({
+        data: allDocs,
+      });
     }
 
     //
-    // 1. Generate embedding for the user's query with OpenAI
+    // If query is provided, do the usual process:
     //
+
+    // 1. Generate embedding for the user's query with OpenAI
     const embeddingResponse = await openai.embeddings.create({
       input: query,
       model: "text-embedding-3-small", // or another OpenAI embedding model
     });
     const [{ embedding }] = embeddingResponse.data;
 
-    //
     // 2. Fetch matches from Supabase via RPC
-    //    - .limit(10) or however many you want to rerank
-    //
     const { data: matches, error: rpcError } = await supabase
       .rpc("match_documents", {
         query_embedding: embedding,
@@ -85,33 +99,22 @@ app.post("/search", async (req, res) => {
         .json({ error: "Error calling match_documents in Supabase." });
     }
 
-    //
     // 3. Rerank matches using Cohere
-    //
-    // "documents" must be an array of strings, so let's map to just the text,
-    // but we also keep track of their indices so we can reconstruct final results.
-    //
     const matchedDocs = matches.map((doc, index) => ({
       index,
       title: doc.title,
       content: doc.content,
     }));
+
     const cohereResponse = await cohere.v2.rerank({
-      model: "rerank-v3.5",  // or "rerank-english-v2.0", etc.
+      model: "rerank-v3.5", // or "rerank-english-v2.0", etc.
       query,
       documents: matchedDocs.map((m) => m.content),
-      topN: 3, // We only want the top 3 from the reranker
+      topN: 3, // We only want the top 3
     });
 
-    // cohereResponse.results has the structure:
-    // [
-    //   { index: <originalIndex>, relevance_score: <score> },
-    //   { index: <originalIndex>, relevance_score: <score> },
-    //   ...
-    // ]
-    // The order is from most relevant (index 0) to least relevant
+    // Construct final data for the top 3
     const rerankedResults = cohereResponse.results.map((r) => {
-      // "r.index" is the position in the original matchedDocs array
       const doc = matchedDocs[r.index];
       return {
         title: doc.title,
@@ -120,9 +123,7 @@ app.post("/search", async (req, res) => {
       };
     });
 
-    //
     // 4. Return top 3 reranked documents
-    //
     return res.status(200).json({
       data: rerankedResults,
     });
